@@ -313,9 +313,12 @@
         /* --- 計時器專用樣式 --- */
         #view-timer {
             display: none;
+            position: fixed; /* 防止整個頁面被滑動 */
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
             flex-direction: column;
-            height: 100vh;
-            height: 100dvh; /* 確保不超過行動裝置視窗高度 */
             padding: 0;
             padding-top: env(safe-area-inset-top);
             overflow: hidden; /* 禁止整體滾動 */
@@ -421,9 +424,9 @@
         }
         .cube-2d-grid {
             display: grid;
-            grid-template-columns: repeat(4, 24px);
-            grid-template-rows: repeat(3, 24px);
-            gap: 2px;
+            grid-template-columns: repeat(4, 36px); /* 從 24px 放大至 36px (1.5倍) */
+            grid-template-rows: repeat(3, 36px);
+            gap: 3px;
         }
         .cube-face {
             display: grid;
@@ -451,6 +454,7 @@
             cursor: pointer;
             user-select: none;
             -webkit-user-select: none;
+            touch-action: none; /* 確保兩點觸控時不觸發網頁手勢 */
         }
 
         .timer-main {
@@ -477,7 +481,7 @@
             border-top-left-radius: 20px;
             border-top-right-radius: 20px;
             padding: 5px 15px 15px 15px;
-            height: 125px; /* 預設縮小：箭頭 + Stats + 1筆紀錄的高度 */
+            height: 110px; /* 稍微縮小，確保能夠精確看見完整的一筆紀錄 */
             flex-shrink: 0;
             display: flex;
             flex-direction: column;
@@ -488,13 +492,23 @@
             height: 50vh; /* 展開高度 */
         }
 
+        .stats-row {
+            display: flex;
+            justify-content: space-around;
+            align-items: center; /* 讓箭頭跟文字垂直對齊 */
+            margin-bottom: 10px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid var(--border);
+            flex-shrink: 0;
+        }
+
         .expand-toggle {
             display: flex;
             justify-content: center;
             align-items: center;
             cursor: pointer;
-            padding-bottom: 5px;
             color: var(--text-muted);
+            padding-right: 10px; /* 增加箭頭跟旁邊 mo3 的一點間距 */
         }
 
         .expand-toggle svg {
@@ -505,15 +519,6 @@
 
         .timer-bottom.expanded .expand-toggle svg {
             transform: rotate(180deg);
-        }
-
-        .stats-row {
-            display: flex;
-            justify-content: space-around;
-            margin-bottom: 10px;
-            padding-bottom: 10px;
-            border-bottom: 1px solid var(--border);
-            flex-shrink: 0;
         }
 
         .stat-box { text-align: center; }
@@ -704,12 +709,12 @@
         </div>
 
         <div class="timer-bottom" id="timer-bottom-panel">
-            <div class="expand-toggle" onclick="toggleTimesPanel()">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <polyline points="18 15 12 9 6 15"></polyline>
-                </svg>
-            </div>
             <div class="stats-row">
+                <div class="expand-toggle" onclick="toggleTimesPanel()">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="18 15 12 9 6 15"></polyline>
+                    </svg>
+                </div>
                 <div class="stat-box">
                     <div class="stat-label">mo3</div>
                     <div class="stat-val" id="stat-mo3">-</div>
@@ -908,6 +913,7 @@
         let timerInterval = null;
         let pressTimeout = null;
         let currentScrambleStr = '';
+        let activePointers = new Set(); // 新增追蹤觸控點
 
         window.goTimer = async () => {
             switchView('view-timer');
@@ -1093,37 +1099,50 @@
             updateCube2D(currentScrambleStr);
         }
 
-        // 計時器操作 (長按 -> 放開開始 -> 點擊結束)
+        // 計時器操作 (雙手長按 -> 放開開始 -> 單點擊結束)
         const timerEl = document.getElementById('timer-display');
-        const timerTouchArea = document.getElementById('timer-touch-area'); // 修改觸控感應區
+        const timerTouchArea = document.getElementById('timer-touch-area');
         
         function handlePointerDown(e) {
-            if (timerState === 'idle') {
+            activePointers.add(e.pointerId);
+
+            // 若正在計時，單指按下就能停止
+            if (timerState === 'running') {
+                stopTimer();
+                return;
+            }
+
+            // 必須同時有兩指按下，才會進入預備狀態
+            if (timerState === 'idle' && activePointers.size === 2) {
                 timerState = 'pressing';
                 timerEl.style.color = 'var(--timer-pressing)';
+                
+                clearTimeout(pressTimeout);
                 pressTimeout = setTimeout(() => {
-                    if (timerState === 'pressing') {
+                    // 確認經過一段時間後，依然是兩根手指按著
+                    if (timerState === 'pressing' && activePointers.size === 2) {
                         timerState = 'ready';
                         timerEl.style.color = 'var(--timer-ready)';
                     }
                 }, 800);
-            } else if (timerState === 'running') {
-                stopTimer();
             }
         }
 
         function handlePointerUp(e) {
-            if (timerState === 'pressing') {
+            activePointers.delete(e.pointerId);
+
+            if (timerState === 'ready') {
+                startTimer();
+            } else if (timerState === 'pressing') {
                 clearTimeout(pressTimeout);
                 timerState = 'idle';
                 timerEl.style.color = 'var(--timer-idle)';
-            } else if (timerState === 'ready') {
-                startTimer();
             }
         }
 
         timerTouchArea.addEventListener('pointerdown', handlePointerDown);
         window.addEventListener('pointerup', handlePointerUp);
+        window.addEventListener('pointercancel', handlePointerUp); // 處理手指滑出螢幕的例外狀況
 
         function startTimer() {
             timerState = 'running';
@@ -1139,6 +1158,7 @@
             const finalTime = Date.now() - timerStart;
             timerEl.innerText = formatTime(finalTime);
             timerState = 'idle';
+            activePointers.clear(); // 結束時計數器歸零防錯
             
             const scrambleToSave = currentScrambleStr;
             generateNewScramble();
